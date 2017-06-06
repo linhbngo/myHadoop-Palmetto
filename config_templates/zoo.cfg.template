@@ -1,0 +1,15 @@
+# The number of milliseconds of each tick
+tickTime=2000
+# The number of ticks that the initial
+# synchronization phase can take
+initLimit-10
+# The number of ticks that can pass between
+# sending a request and getting an acknowledgement
+syncLimit=5
+# The directory where the snapshot is stored
+dataDir=ZOOKEEPER_DATA_DIR
+# The port at which clients will connect
+clientPort=2181
+server.1=ZOO_NODE1:2888:3888
+server.2=ZOO_NODE2:2888:3888
+server.3=ZOO_NODE3:2888:3888

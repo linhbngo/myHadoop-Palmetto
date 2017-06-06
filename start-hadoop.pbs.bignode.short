@@ -1,0 +1,87 @@
+#!/bin/bash
+
+#PBS -N HDP-2.2
+#PBS -l select=5:ncpus=16:mem=60gb
+#PBS -l walltime=06:00:00
+#PBS -j oe
+set -x
+
+NUM_HOSTS=$(wc -l < ${PBS_NODEFILE})
+export HADOOP_CONF_DIR="${MY_HADOOP_DIR}/config"
+
+
+NAME_NODE=`awk 'NR==1{print;exit}' $PBS_NODEFILE`
+RESOURCE_NODE=`awk 'NR==2{print;exit}' $PBS_NODEFILE`
+
+rm -rf ${MY_HADOOP_DIR}/hadoop/logs/*
+rm -rf ${MY_HADOOP_DIR}/hbase/logs/*
+
+for ((i=1; i<=${NUM_HOSTS}; i++))
+do
+	node=`awk 'NR=='"$i"'{print;exit}' $PBS_NODEFILE`
+	echo "Cleaning any old data from node: $node"
+	cmd="rm -rf /local_scratch/${USER}/"
+	echo $cmd
+	ssh $node $cmd
+done
+
+: "Set up the configure for Hadoop"
+${MY_HADOOP_DIR}/bin/pbs-configure.sh -n ${NUM_HOSTS} -c ${HADOOP_CONF_DIR}
+
+: "Format HDFS"
+time ${HADOOP_PREFIX}/bin/hdfs --config ${HADOOP_CONF_DIR} namenode -format
+
+: "Start all Hadoop Services"
+: "Start the namenode"
+NAMENODES=$(${HADOOP_PREFIX}/bin/hdfs getconf -namenodes)
+${HADOOP_PREFIX}/sbin/hadoop-daemon.sh --config ${HADOOP_CONF_DIR} --script hdfs start namenode
+: "Start the datanodes"
+${HADOOP_PREFIX}/sbin/hadoop-daemons.sh --config ${HADOOP_CONF_DIR} --script hdfs start datanode
+: "Start the secondary namenode"
+ssh ${RESOURCE_NODE} "${HADOOP_PREFIX}/sbin/hadoop-daemon.sh --config ${HADOOP_CONF_DIR} --script hdfs start secondarynamenode"
+: "Start the resource manager"
+ssh ${RESOURCE_NODE} "${HADOOP_PREFIX}/sbin/yarn-daemon.sh --config $YARN_CONF_DIR start resourcemanager"
+: "Start the nodemanagers"
+${HADOOP_PREFIX}/sbin/yarn-daemons.sh --config $YARN_CONF_DIR start nodemanager
+: "Start the job history server"
+${HADOOP_PREFIX}/sbin/mr-jobhistory-daemon.sh start historyserver --config $HADOOP_CONF_DIR
+
+sleep 1m
+
+hadoop fs -copyFromLocal /home/lngo/mapreduce/WordCount/complete-shakespeare.txt /
+
+: "Start all HBase Services"
+#${HBASE_HOME}/bin/start-hbase.sh
+: "Start Zookeeper"
+#${HBASE_HOME}/bin/hbase-daemons.sh --config ${HBASE_CONF_DIR} start zookeeper
+: "Start the HBase Master"
+#${HBASE_HOME}/bin/hbase-daemon.sh --config ${HBASE_CONF_DIR} start master
+: "Start the regionservers"
+#${HBASE_HOME}/bin/hbase-daemons.sh --config ${HBASE_CONF_DIR} start regionserver
+
+
+
+# Sleep (used for testing)
+# Insert code here instead of sleep to run on the cluster through the script
+sleep 5h
+
+: "Stop all Services and Clean Up"
+${MY_HADOOP_DIR}/bin/pbs-stop.sh -n $NUM_HOSTS
+
+
+#: "Stop all HBase Services"
+#${HBASE_HOME}/bin/stop-hbase.sh
+#${HBASE_HOME}/bin/hbase-daemons.sh --config ${HBASE_CONF_DIR} stop regionserver
+#${HBASE_HOME}/bin/hbase-daemon.sh --config ${HBASE_CONF_DIR} stop master
+#${HBASE_HOME}/bin/hbase-daemons.sh --config ${HBASE_CONF_DIR} stop zookeeper
+
+#: "Stop all Hadoop Services"
+${HADOOP_PREFIX}/sbin/mr-jobhistory-daemon.sh stop historyserver --config $HADOOP_CONF_DIR
+${HADOOP_PREFIX}/sbin/yarn-daemons.sh --config $YARN_CONF_DIR stop nodemanager
+ssh ${RESOURCE_NODE} "${HADOOP_PREFIX}/sbin/yarn-daemon.sh --config $YARN_CONF_DIR stop resourcemanager"
+ssh ${RESOURCE_NODE} "${HADOOP_PREFIX}/sbin/hadoop-daemon.sh --config ${HADOOP_CONF_DIR} --script hdfs stop secondarynamenode"
+${HADOOP_PREFIX}/sbin/hadoop-daemons.sh --config ${HADOOP_CONF_DIR} --script hdfs stop datanode
+${HADOOP_PREFIX}/sbin/hadoop-daemon.sh --config ${HADOOP_CONF_DIR} --script hdfs stop namenode
+
+#: " Clean Up"
+${MY_HADOOP_DIR}/bin/pbs-cleanup.sh -n $NUM_HOSTS
